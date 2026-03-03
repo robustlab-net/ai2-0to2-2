@@ -8,6 +8,8 @@ dependencies = [
     "notebook>=7.5.3",
     "python-dotenv==1.1.1",
     "openai>=1.98.0",
+    "streamlit>=1.49.0",
+    "openai-agents>=0.2.9",
 ]
 
 [dependency-groups]
