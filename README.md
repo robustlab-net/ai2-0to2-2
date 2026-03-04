@@ -18,3 +18,8 @@ dev = [
 ]
 uv sync
 ```
+
+## run
+```bash
+uv run streamlit run main.py
+```
