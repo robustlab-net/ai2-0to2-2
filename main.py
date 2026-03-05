@@ -5,7 +5,7 @@ import dotenv
 import json
 import os
 import streamlit as st
-from openai import OpenAI
+from openai import BadRequestError, OpenAI
 
 # Load environment variables from .env (expects OPENAI_API_KEY)
 dotenv.load_dotenv()
@@ -94,7 +94,6 @@ if "agent" not in st.session_state:
 
 
 agent = st.session_state["agent"]
-session = st.session_state["session"]
 
 # Render chat history saved in Streamlit session state
 for msg in st.session_state["messages"]:
@@ -158,26 +157,46 @@ def update_status(status_container, event_name: str) -> None:
         status_container.update(label=label, state=state)
 
 
-async def run_agent(user_message: str) -> str:
-    stream = Runner.run_streamed(agent, user_message, session=session)
+async def stream_once(user_message: str, current_session: SQLiteSession) -> str:
+    stream = Runner.run_streamed(agent, user_message, session=current_session)
     chunks: list[str] = []
 
-    with st.chat_message("assistant"):
-        status_container = st.status("⏳ 응답 생성 중...", expanded=False)
-        placeholder = st.empty()
-        image_placeholder = st.empty()
-        async for event in stream.stream_events():
-            if event.type == "raw_response_event":
-                event_name = getattr(event.data, "type", "")
-                update_status(status_container, event_name)
-                if event_name == "response.output_text.delta":
-                    chunks.append(event.data.delta)
-                    placeholder.markdown("".join(chunks))
-                elif event_name == "response.image_generation_call.partial_image":
-                    image_bytes = base64.b64decode(event.data.partial_image_b64)
-                    image_placeholder.image(image_bytes, caption="Life Coach 생성 이미지")
+    status_container = st.status("⏳ 응답 생성 중...", expanded=False)
+    placeholder = st.empty()
+    image_placeholder = st.empty()
+    async for event in stream.stream_events():
+        if event.type == "raw_response_event":
+            event_name = getattr(event.data, "type", "")
+            update_status(status_container, event_name)
+            if event_name == "response.output_text.delta":
+                chunks.append(event.data.delta)
+                placeholder.markdown("".join(chunks))
+            elif event_name == "response.image_generation_call.partial_image":
+                image_bytes = base64.b64decode(event.data.partial_image_b64)
+                image_placeholder.image(image_bytes, caption="Life Coach 생성 이미지")
 
     return "".join(chunks).strip()
+
+
+async def run_agent(user_message: str) -> str:
+    with st.chat_message("assistant"):
+        current_session = st.session_state["session"]
+        try:
+            return await stream_once(user_message, current_session)
+        except BadRequestError as exc:
+            message = str(exc)
+            is_legacy_action_error = (
+                "Unknown parameter" in message
+                and ".action" in message
+                and "input[" in message
+            )
+            if not is_legacy_action_error:
+                raise
+
+            st.warning("이전 세션 포맷 충돌을 감지해 메모리를 초기화하고 다시 시도합니다.")
+            await current_session.clear_session()
+            st.session_state["session"] = SQLiteSession(SESSION_ID, DB_PATH)
+            return await stream_once(user_message, st.session_state["session"])
 
 
 prompt = st.chat_input("요즘 어떤 고민이 있나요?")
@@ -279,12 +298,12 @@ with st.sidebar:
             st.write(f"- {item['timestamp']} · {item['entry_type']} · {item['note']}")
 
     if st.button("Reset memory", use_container_width=True):
-        asyncio.run(session.clear_session())
+        asyncio.run(st.session_state["session"].clear_session())
         st.session_state["messages"] = []
         if os.path.exists(PROGRESS_LOG_PATH):
             os.remove(PROGRESS_LOG_PATH)
         st.rerun()
 
     if st.button("Show memory items", use_container_width=True):
-        items = asyncio.run(session.get_items())
+        items = asyncio.run(st.session_state["session"].get_items())
         st.write(items)
