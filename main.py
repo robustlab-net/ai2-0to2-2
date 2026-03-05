@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import datetime as dt
 import dotenv
 import json
@@ -22,10 +23,16 @@ Runner = agents.Runner
 SQLiteSession = agents.SQLiteSession
 WebSearchTool = getattr(agents, "WebSearchTool", None)
 FileSearchTool = getattr(agents, "FileSearchTool", None)
+ImageGenerationTool = getattr(agents, "ImageGenerationTool", None)
 
 st.set_page_config(page_title="Life Coach Agent", page_icon="🧭", layout="centered")
 st.title("🧭 Life Coach Agent")
 st.caption("동기부여, 자기개발, 습관 형성을 돕는 코치")
+st.info(
+    "예시: `2025년 목표 비전 보드 만들어줘`, "
+    "`책 10권 읽기 달성 축하 포스터 만들어줘`, "
+    "`내 최근 진행 상황을 시각적으로 표현해줘`"
+)
 
 SESSION_ID = "life-coach-session"
 DB_PATH = "life-coach-memory.db"
@@ -51,6 +58,17 @@ if "agent" not in st.session_state:
                 max_num_results=5,
             )
         )
+    if ImageGenerationTool is not None:
+        tools.append(
+            ImageGenerationTool(
+                tool_config={
+                    "type": "image_generation",
+                    "quality": "high",
+                    "output_format": "jpeg",
+                    "partial_images": 1,
+                }
+            )
+        )
 
     st.session_state["agent"] = Agent(
         name="Life Coach",
@@ -63,7 +81,13 @@ if "agent" not in st.session_state:
             "to retrieve relevant personal context, then tailor your advice to those records. "
             "When useful, combine file search with web search for current evidence-based recommendations. "
             "For progress check-ins, mention what changed over time based on dated records if available. "
-            "Encourage the user while staying realistic and specific."
+            "Encourage the user while staying realistic and specific. "
+            "You can create visual coaching assets with image generation. "
+            "When user requests celebration, motivation, or planning visuals, proactively generate: "
+            "1) goal-based vision board, 2) custom motivational poster with personalized message, "
+            "3) progress visualization concept art. "
+            "When generating images, first summarize the inferred goals/theme in 1-2 lines, "
+            "then call image generation with a detailed prompt."
         ),
         tools=tools,
     )
@@ -123,6 +147,10 @@ def update_status(status_container, event_name: str) -> None:
         "response.file_search_call.in_progress": ("🗂️ 개인 기록 검색 시작...", "running"),
         "response.file_search_call.searching": ("🗂️ 개인 기록 검색 중...", "running"),
         "response.file_search_call.completed": ("✅ 개인 기록 검색 완료", "complete"),
+        "response.image_generation_call.in_progress": ("🎨 코칭 이미지 생성 시작...", "running"),
+        "response.image_generation_call.generating": ("🎨 코칭 이미지 생성 중...", "running"),
+        "response.image_generation_call.partial_image": ("🎨 이미지 초안 생성됨", "running"),
+        "response.image_generation_call.completed": ("✅ 코칭 이미지 생성 완료", "complete"),
         "response.completed": ("완료", "complete"),
     }
     if event_name in status_messages:
@@ -137,6 +165,7 @@ async def run_agent(user_message: str) -> str:
     with st.chat_message("assistant"):
         status_container = st.status("⏳ 응답 생성 중...", expanded=False)
         placeholder = st.empty()
+        image_placeholder = st.empty()
         async for event in stream.stream_events():
             if event.type == "raw_response_event":
                 event_name = getattr(event.data, "type", "")
@@ -144,6 +173,9 @@ async def run_agent(user_message: str) -> str:
                 if event_name == "response.output_text.delta":
                     chunks.append(event.data.delta)
                     placeholder.markdown("".join(chunks))
+                elif event_name == "response.image_generation_call.partial_image":
+                    image_bytes = base64.b64decode(event.data.partial_image_b64)
+                    image_placeholder.image(image_bytes, caption="Life Coach 생성 이미지")
 
     return "".join(chunks).strip()
 
@@ -176,6 +208,11 @@ with st.sidebar:
         st.warning("현재 SDK에서 `FileSearchTool`을 찾지 못했습니다. Agents SDK 버전을 확인해 주세요.")
     else:
         st.success("파일 검색 도구 활성화")
+
+    if ImageGenerationTool is None:
+        st.warning("현재 SDK에서 `ImageGenerationTool`을 찾지 못했습니다. Agents SDK 버전을 확인해 주세요.")
+    else:
+        st.success("이미지 생성 도구 활성화")
 
     uploaded_docs = st.file_uploader(
         "개인 목표 문서 업로드 (PDF/TXT)",
