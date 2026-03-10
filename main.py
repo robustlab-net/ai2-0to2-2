@@ -1,309 +1,138 @@
 import asyncio
-import base64
-import datetime as dt
-import dotenv
-import json
-import os
-import streamlit as st
-from openai import BadRequestError, OpenAI
 
-# Load environment variables from .env (expects OPENAI_API_KEY)
+import dotenv
+import streamlit as st
+from agents import InputGuardrailTripwireTriggered, Runner, SQLiteSession
+
+from models import UserAccountContext
+from my_agents.triage_agent import triage_agent
+
+
 dotenv.load_dotenv()
 
-try:
-    import agents
-except ModuleNotFoundError as exc:
-    raise RuntimeError(
-        "`agents` 패키지가 설치되어 있지 않습니다. `pip install openai-agents streamlit` 후 다시 실행하세요."
-    ) from exc
+st.set_page_config(page_title="Restaurant Bot", page_icon="🍽️", layout="centered")
+st.title("🍽️ Restaurant Bot")
+st.caption("Triage Agent가 요청을 분석해 메뉴/주문/예약 전문 에이전트로 연결합니다.")
 
-
-Agent = agents.Agent
-Runner = agents.Runner
-SQLiteSession = agents.SQLiteSession
-WebSearchTool = getattr(agents, "WebSearchTool", None)
-FileSearchTool = getattr(agents, "FileSearchTool", None)
-ImageGenerationTool = getattr(agents, "ImageGenerationTool", None)
-
-st.set_page_config(page_title="Life Coach Agent", page_icon="🧭", layout="centered")
-st.title("🧭 Life Coach Agent")
-st.caption("동기부여, 자기개발, 습관 형성을 돕는 코치")
-st.info(
-    "예시: `2025년 목표 비전 보드 만들어줘`, "
-    "`책 10권 읽기 달성 축하 포스터 만들어줘`, "
-    "`내 최근 진행 상황을 시각적으로 표현해줘`"
+user_account_ctx = UserAccountContext(
+    customer_id=1,
+    name="bukoi",
+    tier="basic",
 )
 
-SESSION_ID = "life-coach-session"
-DB_PATH = "life-coach-memory.db"
-PROGRESS_LOG_PATH = "progress_log.jsonl"
-VECTOR_STORE_ID = os.getenv("VECTOR_STORE_ID", "")
-
-client = OpenAI()
+SESSION_NAME = "restaurant-chat-history"
+DB_PATH = "restaurant-memory.db"
 
 if "session" not in st.session_state:
-    st.session_state["session"] = SQLiteSession(SESSION_ID, DB_PATH)
-
-if "messages" not in st.session_state:
-    st.session_state["messages"] = []
+    st.session_state["session"] = SQLiteSession(SESSION_NAME, DB_PATH)
+session = st.session_state["session"]
 
 if "agent" not in st.session_state:
-    tools = []
-    if WebSearchTool is not None:
-        tools.append(WebSearchTool())
-    if FileSearchTool is not None and VECTOR_STORE_ID:
-        tools.append(
-            FileSearchTool(
-                vector_store_ids=[VECTOR_STORE_ID],
-                max_num_results=5,
-            )
-        )
-    if ImageGenerationTool is not None:
-        tools.append(
-            ImageGenerationTool(
-                tool_config={
-                    "type": "image_generation",
-                    "quality": "high",
-                    "output_format": "jpeg",
-                    "partial_images": 1,
-                }
-            )
-        )
+    st.session_state["agent"] = triage_agent
 
-    st.session_state["agent"] = Agent(
-        name="Life Coach",
-        instructions=(
-            "You are an empathetic and motivating life coach. "
-            "Always answer in Korean unless the user asks another language. "
-            "Give practical, concrete steps. "
-            "The user stores personal goals and diary notes in uploaded files. "
-            "When the user asks about progress, goals, habits, or past records, use file search first "
-            "to retrieve relevant personal context, then tailor your advice to those records. "
-            "When useful, combine file search with web search for current evidence-based recommendations. "
-            "For progress check-ins, mention what changed over time based on dated records if available. "
-            "Encourage the user while staying realistic and specific. "
-            "You can create visual coaching assets with image generation. "
-            "When user requests celebration, motivation, or planning visuals, proactively generate: "
-            "1) goal-based vision board, 2) custom motivational poster with personalized message, "
-            "3) progress visualization concept art. "
-            "When generating images, first summarize the inferred goals/theme in 1-2 lines, "
-            "then call image generation with a detailed prompt."
-        ),
-        tools=tools,
-    )
+if "last_specialist_agent_name" not in st.session_state:
+    st.session_state["last_specialist_agent_name"] = ""
 
 
-agent = st.session_state["agent"]
+async def paint_history() -> None:
+    messages = await session.get_items()
+    for message in messages:
+        role = message.get("role")
+        if role not in {"user", "assistant"}:
+            continue
 
-# Render chat history saved in Streamlit session state
-for msg in st.session_state["messages"]:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-
-def log_progress(entry_type: str, note: str) -> None:
-    record = {
-        "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
-        "entry_type": entry_type,
-        "note": note[:180],
-    }
-    with open(PROGRESS_LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
-
-
-def read_progress_logs() -> list[dict]:
-    if not os.path.exists(PROGRESS_LOG_PATH):
-        return []
-    logs: list[dict] = []
-    with open(PROGRESS_LOG_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
+        with st.chat_message(role):
+            if role == "user":
+                content = message.get("content", "")
+                if isinstance(content, str):
+                    st.write(content)
                 continue
-            try:
-                logs.append(json.loads(line))
-            except json.JSONDecodeError:
+
+            if message.get("type") != "message":
                 continue
-    return logs
+
+            content = message.get("content", [])
+            text_chunks: list[str] = []
+            if isinstance(content, list):
+                for part in content:
+                    if not isinstance(part, dict):
+                        continue
+                    if "text" in part:
+                        text_chunks.append(part["text"])
+            elif isinstance(content, str):
+                text_chunks.append(content)
+
+            merged = "".join(text_chunks).strip()
+            if merged:
+                st.write(merged.replace("$", "\\$"))
 
 
-def upload_to_vector_store(file_name: str, content: bytes) -> None:
-    uploaded_file = client.files.create(
-        file=(file_name, content),
-        purpose="user_data",
-    )
-    client.vector_stores.files.create(
-        vector_store_id=VECTOR_STORE_ID,
-        file_id=uploaded_file.id,
-    )
+asyncio.run(paint_history())
 
 
-def update_status(status_container, event_name: str) -> None:
-    status_messages = {
-        "response.web_search_call.in_progress": ("🔍 웹 검색 시작...", "running"),
-        "response.web_search_call.searching": ("🔍 웹 검색 중...", "running"),
-        "response.web_search_call.completed": ("✅ 웹 검색 완료", "complete"),
-        "response.file_search_call.in_progress": ("🗂️ 개인 기록 검색 시작...", "running"),
-        "response.file_search_call.searching": ("🗂️ 개인 기록 검색 중...", "running"),
-        "response.file_search_call.completed": ("✅ 개인 기록 검색 완료", "complete"),
-        "response.image_generation_call.in_progress": ("🎨 코칭 이미지 생성 시작...", "running"),
-        "response.image_generation_call.generating": ("🎨 코칭 이미지 생성 중...", "running"),
-        "response.image_generation_call.partial_image": ("🎨 이미지 초안 생성됨", "running"),
-        "response.image_generation_call.completed": ("✅ 코칭 이미지 생성 완료", "complete"),
-        "response.completed": ("완료", "complete"),
+def handoff_message(new_agent_name: str) -> str:
+    mapping = {
+        "Menu Agent": "메뉴 전문가에게 연결합니다...",
+        "Order Agent": "주문 담당에게 연결합니다...",
+        "Reservation Agent": "예약 담당에게 연결합니다...",
+        "Triage Agent": "접수 담당으로 다시 연결합니다...",
     }
-    if event_name in status_messages:
-        label, state = status_messages[event_name]
-        status_container.update(label=label, state=state)
+    return mapping.get(new_agent_name, f"{new_agent_name}에게 연결합니다...")
 
 
-async def stream_once(user_message: str, current_session: SQLiteSession) -> str:
-    stream = Runner.run_streamed(agent, user_message, session=current_session)
-    chunks: list[str] = []
-
-    status_container = st.status("⏳ 응답 생성 중...", expanded=False)
-    placeholder = st.empty()
-    image_placeholder = st.empty()
-    async for event in stream.stream_events():
-        if event.type == "raw_response_event":
-            event_name = getattr(event.data, "type", "")
-            update_status(status_container, event_name)
-            if event_name == "response.output_text.delta":
-                chunks.append(event.data.delta)
-                placeholder.markdown("".join(chunks))
-            elif event_name == "response.image_generation_call.partial_image":
-                image_bytes = base64.b64decode(event.data.partial_image_b64)
-                image_placeholder.image(image_bytes, caption="Life Coach 생성 이미지")
-
-    return "".join(chunks).strip()
-
-
-async def run_agent(user_message: str) -> str:
+async def run_agent(message: str) -> None:
     with st.chat_message("assistant"):
-        current_session = st.session_state["session"]
+        text_placeholder = st.empty()
+        response = ""
+        current_agent = triage_agent
+
         try:
-            return await stream_once(user_message, current_session)
-        except BadRequestError as exc:
-            message = str(exc)
-            is_legacy_action_error = (
-                "Unknown parameter" in message
-                and ".action" in message
-                and "input[" in message
+            stream = Runner.run_streamed(
+                current_agent,
+                message,
+                session=session,
+                context=user_account_ctx,
             )
-            if not is_legacy_action_error:
-                raise
 
-            st.warning("이전 세션 포맷 충돌을 감지해 메모리를 초기화하고 다시 시도합니다.")
-            await current_session.clear_session()
-            st.session_state["session"] = SQLiteSession(SESSION_ID, DB_PATH)
-            return await stream_once(user_message, st.session_state["session"])
+            async for event in stream.stream_events():
+                if event.type == "raw_response_event":
+                    if event.data.type == "response.output_text.delta":
+                        response += event.data.delta
+                        text_placeholder.write(response.replace("$", "\\$"))
+
+                elif event.type == "agent_updated_stream_event":
+                    if current_agent.name != event.new_agent.name:
+                        should_show_handoff = (
+                            event.new_agent.name == "Triage Agent"
+                            or st.session_state["last_specialist_agent_name"] != event.new_agent.name
+                        )
+                        if should_show_handoff:
+                            st.info(handoff_message(event.new_agent.name))
+                        if event.new_agent.name != "Triage Agent":
+                            st.session_state["last_specialist_agent_name"] = event.new_agent.name
+                        current_agent = event.new_agent
+                        st.session_state["agent"] = event.new_agent
+
+        except InputGuardrailTripwireTriggered:
+            st.write("해당 요청은 처리할 수 없습니다.")
 
 
-prompt = st.chat_input("요즘 어떤 고민이 있나요?")
+message = st.chat_input("요청을 입력하세요 (예: 예약하고 싶어요 / 채식 메뉴 있어요?)")
 
-if prompt:
-    st.session_state["messages"].append({"role": "user", "content": prompt})
+if message:
     with st.chat_message("user"):
-        st.markdown(prompt)
-
-    reply = asyncio.run(run_agent(prompt))
-    if not reply:
-        reply = "지금 응답을 생성하지 못했어요. 잠시 후 다시 시도해 주세요."
-
-    st.session_state["messages"].append({"role": "assistant", "content": reply})
+        st.write(message)
+    asyncio.run(run_agent(message))
 
 
 with st.sidebar:
-    st.subheader("Memory")
-
-    if WebSearchTool is None:
-        st.warning("현재 SDK에서 `WebSearchTool`을 찾지 못했습니다. Agents SDK 버전을 확인해 주세요.")
-    else:
-        st.success("웹 검색 도구 활성화")
-
-    if not VECTOR_STORE_ID:
-        st.warning("`.env`에 `VECTOR_STORE_ID`를 설정하면 목표/일기 파일 검색을 활성화할 수 있습니다.")
-    elif FileSearchTool is None:
-        st.warning("현재 SDK에서 `FileSearchTool`을 찾지 못했습니다. Agents SDK 버전을 확인해 주세요.")
-    else:
-        st.success("파일 검색 도구 활성화")
-
-    if ImageGenerationTool is None:
-        st.warning("현재 SDK에서 `ImageGenerationTool`을 찾지 못했습니다. Agents SDK 버전을 확인해 주세요.")
-    else:
-        st.success("이미지 생성 도구 활성화")
-
-    uploaded_docs = st.file_uploader(
-        "개인 목표 문서 업로드 (PDF/TXT)",
-        type=["pdf", "txt"],
-        accept_multiple_files=True,
-        help="업로드한 문서는 코치가 목표 점검 시 참조합니다.",
-    )
-
-    if st.button("목표 문서 업로드", use_container_width=True):
-        if not uploaded_docs:
-            st.info("업로드할 파일을 먼저 선택해 주세요.")
-        elif not VECTOR_STORE_ID:
-            st.error("`VECTOR_STORE_ID`가 없어 업로드할 수 없습니다.")
-        else:
-            for file in uploaded_docs:
-                with st.status(f"⏳ `{file.name}` 업로드 중..."):
-                    upload_to_vector_store(file.name, file.getvalue())
-                    log_progress("goal_upload", f"목표 문서 업로드: {file.name}")
-            st.success("선택한 목표 문서 업로드가 완료되었습니다.")
-
-    st.divider()
-    st.caption("오늘 일기/진행 기록 저장")
-    diary_text = st.text_area(
-        "일기 또는 진행 메모",
-        placeholder="예: 이번 주 운동 2회 완료, 수면은 평균 6시간...",
-        height=120,
-    )
-    if st.button("일기 저장", use_container_width=True):
-        if not diary_text.strip():
-            st.info("저장할 내용을 입력해 주세요.")
-        elif not VECTOR_STORE_ID:
-            st.error("`VECTOR_STORE_ID`가 없어 저장할 수 없습니다.")
-        else:
-            now = dt.datetime.now()
-            file_name = f"diary-{now.strftime('%Y%m%d-%H%M%S')}.txt"
-            body = (
-                f"Date: {now.strftime('%Y-%m-%d %H:%M')}\n"
-                f"Type: diary\n\n"
-                f"{diary_text.strip()}\n"
-            )
-            with st.status("⏳ 일기 저장 중..."):
-                upload_to_vector_store(file_name, body.encode("utf-8"))
-                log_progress("diary", diary_text.strip())
-            st.success("일기가 저장되었습니다. 코치가 다음 조언에서 참조할 수 있습니다.")
-
-    st.divider()
-    logs = read_progress_logs()
-    st.metric("누적 기록 수", len(logs))
-    if logs:
-        daily_counts: dict[str, int] = {}
-        for item in logs:
-            day = item.get("timestamp", "")[:10]
-            if not day:
-                continue
-            daily_counts[day] = daily_counts.get(day, 0) + 1
-
-        chart_data = [
-            {"date": day, "entries": count}
-            for day, count in sorted(daily_counts.items())
-        ]
-        st.bar_chart(chart_data, x="date", y="entries")
-        st.caption("최근 기록")
-        for item in logs[-5:][::-1]:
-            st.write(f"- {item['timestamp']} · {item['entry_type']} · {item['note']}")
+    st.subheader("Session")
+    st.write(f"현재 에이전트: `{st.session_state['agent'].name}`")
 
     if st.button("Reset memory", use_container_width=True):
-        asyncio.run(st.session_state["session"].clear_session())
-        st.session_state["messages"] = []
-        if os.path.exists(PROGRESS_LOG_PATH):
-            os.remove(PROGRESS_LOG_PATH)
+        asyncio.run(session.clear_session())
+        st.session_state["agent"] = triage_agent
         st.rerun()
 
     if st.button("Show memory items", use_container_width=True):
-        items = asyncio.run(st.session_state["session"].get_items())
-        st.write(items)
+        st.write(asyncio.run(session.get_items()))

@@ -1,0 +1,23 @@
+Title: 2026 Personal Goals
+Owner: User
+Created: 2026-03-04
+
+[Health]
+- Exercise at least 3 times per week (Mon, Wed, Sat)
+- Sleep before 12:30 AM on weekdays
+- Walk 8,000+ steps per day
+
+[Career]
+- Study AI engineering for 5 hours per week
+- Build and publish 1 portfolio project per month
+- Practice technical interview problems 3 times per week
+
+[Mindset]
+- Write a short daily journal entry every night
+- Review weekly progress every Sunday
+- Keep screen time below 2 hours after 10 PM
+
+[Success Metrics]
+- Weekly exercise count >= 3
+- Monthly portfolio projects >= 1
+- Weekly journal entries >= 5
