@@ -10,3 +10,7 @@ wheels/
 .venv
 .env
 .idea
+.streamlit/secrets.toml
+restaurant-memory.db
+restaurant-memory.db-shm
+restaurant-memory.db-wal

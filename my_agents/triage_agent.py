@@ -1,4 +1,6 @@
 from agents import Agent, handoff
+from guardrails import restaurant_domain_input_guardrail, restaurant_output_guardrail
+from my_agents.complaints_agent import complaints_agent
 from my_agents.menu_agent import menu_agent
 from my_agents.order_agent import order_agent
 from my_agents.reservation_agent import reservation_agent
@@ -11,6 +13,7 @@ triage_agent = Agent(
         "1) 메뉴/재료/알레르기/채식: Menu Agent "
         "2) 주문 접수/변경/확인: Order Agent "
         "3) 예약/예약 변경/취소: Reservation Agent "
+        "4) 불만/클레임/서비스 이슈: Complaints Agent "
         "handoff 직전에는 반드시 짧게 안내하세요. 예: '예약 담당에게 연결해 드릴게요.' "
         "전문 에이전트가 더 잘 처리할 수 있으면 즉시 handoff 하세요. "
         "중요: 안내 문구만 말하고 끝내지 말고, 반드시 해당 handoff 도구를 실제로 호출하세요."
@@ -19,5 +22,8 @@ triage_agent = Agent(
         handoff(menu_agent),
         handoff(order_agent),
         handoff(reservation_agent),
+        handoff(complaints_agent),
     ],
+    input_guardrails=[restaurant_domain_input_guardrail],
+    output_guardrails=[restaurant_output_guardrail],
 )
