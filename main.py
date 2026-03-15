@@ -10,6 +10,7 @@ from agents import (
     Runner,
     SQLiteSession,
 )
+from streamlit.errors import StreamlitSecretNotFoundError
 
 from models import UserAccountContext
 from my_agents.triage_agent import triage_agent
@@ -31,7 +32,10 @@ DB_PATH = "restaurant-memory.db"
 
 
 def resolve_api_key() -> str | None:
-    secrets_key = st.secrets.get("OPENAI_API_KEY")
+    try:
+        secrets_key = st.secrets.get("OPENAI_API_KEY")
+    except StreamlitSecretNotFoundError:
+        secrets_key = None
     env_key = os.getenv("OPENAI_API_KEY")
     return secrets_key or env_key
 
