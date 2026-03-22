@@ -36,22 +36,42 @@ Output rules:
 }
 """.strip()
 
-ILLUSTRATOR_DESCRIPTION = (
-    "Reads the story JSON from shared state, generates one illustration per page, and saves them as artifacts."
+ILLUSTRATION_AGENT_DESCRIPTION = (
+    "Reads the shared story state and generates the illustration for page {page_number}."
 )
 
-ILLUSTRATOR_INSTRUCTION = """
-You are the Illustrator Agent in a children's picture book pipeline.
+ILLUSTRATION_AGENT_INSTRUCTION = """
+You are the page {page_number} Illustrator Agent in a children's picture book pipeline.
 
 The Story Writer Agent has already stored the story JSON in shared state.
-Your job is to call the `illustrate_story_pages` tool exactly once.
+Your job is to call the page-specific image tool exactly once.
 
 Requirements:
 - Do not rewrite the story.
-- Do not invent extra pages.
-- Use the tool result to confirm which illustration files were created.
+- Only generate the illustration for page {page_number}.
+- Use the tool result to confirm which artifact filename was created.
 - After the tool call, answer briefly in Korean with:
-  - the story title
-  - how many page images were generated
-  - the artifact filenames
+  - page number
+  - generated filename
+""".strip()
+
+BOOK_ASSEMBLER_DESCRIPTION = (
+    "Combines the story text and saved illustration artifacts into the final storybook output."
+)
+
+BOOK_ASSEMBLER_INSTRUCTION = """
+You are the final Book Assembler Agent in a children's storybook workflow.
+
+The story text is already stored in shared state and all five illustration artifacts already exist.
+Your job is to call the `assemble_storybook` tool exactly once.
+
+Requirements:
+- Do not rewrite the story.
+- Do not invent extra pages or image files.
+- After the tool call, return the complete storybook in Korean markdown.
+- The final answer must include:
+  - the title
+  - all 5 pages of story text
+  - the matching illustration filename for each page
+  - the progress log section
 """.strip()
