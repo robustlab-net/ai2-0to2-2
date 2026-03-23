@@ -1,12 +1,13 @@
 ## Storybook Team
 
-Google ADK Workflow Agent로 만든 어린이 동화책 파이프라인입니다.
+OpenAI API와 Google ADK Workflow Agent를 조합한 어린이 동화책 파이프라인입니다.
 
 구성:
 
 - `SequentialAgent`: 전체 흐름을 관리합니다.
-- `StoryWriterAgent`: 사용자의 테마를 받아 5페이지 동화를 JSON으로 작성하고 state에 저장합니다.
+- `StoryWriterAgent`: OpenAI `Responses API`로 5페이지 동화를 만들고 state에 저장합니다.
 - `ParallelAgent`: 5개의 페이지 삽화 에이전트를 동시에 실행합니다.
+- `IllustratorPage1~5Agent`: OpenAI `Images API`로 각 페이지 삽화를 생성하고 artifact로 저장합니다.
 - `BookAssemblerAgent`: 스토리 텍스트와 삽화 artifact를 합쳐 최종 동화책 markdown을 만듭니다.
 - `Callbacks`: 진행 상태를 state에 기록하고 단계 완료 메시지를 Web UI에 보여줍니다.
 
@@ -47,19 +48,23 @@ uv sync
 환경 변수:
 
 ```bash
-export GOOGLE_API_KEY="your-google-api-key"
+export OPENAI_API_KEY="your-openai-api-key"
 ```
 
 선택 설정:
 
 ```bash
-export STORYBOOK_TEXT_MODEL="gemini-2.5-flash"
-export STORYBOOK_IMAGE_MODEL="gemini-2.5-flash-image"
+export STORYBOOK_TEXT_MODEL="gpt-5-mini"
+export STORYBOOK_IMAGE_MODEL="gpt-image-1"
+```
+
+OpenAI 호환 게이트웨이를 쓰는 경우:
+
+```bash
+export OPENAI_BASE_URL="https://your-endpoint.example.com/v1"
 ```
 
 ## Test With ADK Web
-
-ADK Web UI는 에이전트 폴더를 포함하는 상위 디렉터리에서 실행합니다.
 
 ```bash
 uv run adk web
