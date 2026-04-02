@@ -1,9 +1,9 @@
 [project]
 name = "ai2-0to2-2"
 version = "0.1.0"
-description = "Add your description here"
+description = "Education Agent with Streamlit UI and LangGraph workflow"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "google-adk>=1.18.0",
     "google-genai>=1.30.0",
